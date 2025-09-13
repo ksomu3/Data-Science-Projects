@@ -1,7 +1,7 @@
 # Price Elasticity Regression Model
 
 This project analyzes U.S. grocery price trends and consumer price sensitivity from **2019–2023**.  
-It focuses on modeling how **income class** influences price elasticity—how responsive consumers are to price changes in common grocery items such as eggs, chicken, ice cream, and coffee.
+It focuses on modeling how **income class** influences price elasticity—how responsive consumers are to price changes in common grocery items such as eggs, chicken, ice cream, and coffee.  
 For more information about the results of the model, please report to the report. This price elasticity analysis was part of a larger project for school.
 
 ## Description
@@ -34,5 +34,5 @@ library(caret)
 library(tidyverse)
 ```
 
-Install any missing packages in R with:
+Install any missing packages in R with:  
 install.packages("package_name")
