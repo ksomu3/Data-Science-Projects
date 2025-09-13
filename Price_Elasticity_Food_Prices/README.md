@@ -16,3 +16,6 @@ It focuses on modeling how **income class** influences price elasticity—how re
 3. Import the packages dplyr, ggplot2, MASS, car, rpart, randomForest, caret, and tidyverse.
 4. Import the file "team126_priceelasticity_analysis.ipynb"
 5. Import the file "6242 Extract.csv"
+
+
+https://drive.google.com/drive/folders/1y91-W1TM-aiv4VLy_4DqpRUSf_cI_b1u?usp=sharing
