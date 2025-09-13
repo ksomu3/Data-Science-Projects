@@ -2,6 +2,7 @@
 
 This project analyzes U.S. grocery price trends and consumer price sensitivity from **2019–2023**.  
 It focuses on modeling how **income class** influences price elasticity—how responsive consumers are to price changes in common grocery items such as eggs, chicken, ice cream, and coffee.
+For more information about the results of the model, please report to the report. This price elasticity analysis was part of a larger project for school.
 
 ## Description
 - Measures **price elasticity** using an R-based regression model, with income class included as interaction terms to reveal differences in sensitivity to price changes.
