@@ -15,7 +15,23 @@ It focuses on modeling how **income class** influences price elasticity—how re
 2. Install R kernel in Jupyter notebook environment through install.packages("IRkernel")
 3. Import the packages dplyr, ggplot2, MASS, car, rpart, randomForest, caret, and tidyverse.
 4. Import the file "team126_priceelasticity_analysis.ipynb"
-5. Import the file "6242 Extract.csv"
+5. Please go the following link: https://drive.google.com/drive/folders/1y91-W1TM-aiv4VLy_4DqpRUSf_cI_b1u?usp=sharing and download the Grocery_Transaction_Data.zip to get the 6242 Extract.csv file
+6. Save the ipynb and csv file in the same folder
+7. In the ipynb file update the folder path that you are using. 
+## Requirements
 
+The notebook requires the following R packages:
+```r
+library(dplyr)
+library(ggplot2)
+library(MASS)
+library(car)
+library(rpart)
+library(rpart.plot)
+library(randomForest)
+library(caret)
+library(tidyverse)
+```
 
-https://drive.google.com/drive/folders/1y91-W1TM-aiv4VLy_4DqpRUSf_cI_b1u?usp=sharing
+Install any missing packages in R with:
+install.packages("package_name")
