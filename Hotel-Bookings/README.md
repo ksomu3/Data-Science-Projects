@@ -18,9 +18,10 @@ This project analyzes hotel booking data to **predict whether a reservation will
 - `hotel_bookings.csv` – Dataset of hotel reservations and cancellations.
 
 ## How to Open and Run
-1. **Open a Jupyter notebook**  
-   We will be using **Jupyter** (or JupyterLab/VS Code with Jupyter support) to run the **R** language.
-2. **Install the R kernel in Jupyter (if not already installed)**
+1. Open a Jupyter notebook - we will be using this IDE to run the language R.
+2. Install R kernel in Jupyter notebook environment through install.packages("IRkernel")
+3. Download  `Hw5_Appendix.ipynb` and `hotel_bookings.csv` into the same folder
+4. Install the R packages below if not already installed
 
 ## Requirements
 
