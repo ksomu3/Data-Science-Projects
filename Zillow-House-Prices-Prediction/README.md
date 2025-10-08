@@ -1,12 +1,33 @@
-Notes on Running the Code:
+Zillow House Price Prediction
 
-1. Please ensure the attached CSV files are in the same working directory as the python files.
+Notes on Running the Code
+	1.	Please ensure the attached CSV files (*_ForSale.csv and *_RecentlySold.csv) are in the same working directory as the .py files. These files are created automatically when the API is first called.
+	2.	To run the models for a new city-state, edit lines 298–302 in the code. These lines allow you to specify the city and state for which you’d like to generate predictions.
+	3.	Only the following city-state combinations can currently be used:
+	•	Doral, FL
+	•	Kendall, FL
+	•	Miami, FL
+Note: We unsubscribed from the API after completing our analysis to avoid additional costs. These models will still run using the saved CSVs from earlier API pulls.
+	4.	Once a model is run, a new CSV file (e.g., Doral_FL_ranked.csv) will be created. This file ranks homes from most undervalued to least.
+	5.	Running a different model on the same city will update the ranking using the new model’s predictions, overwriting the previous ranked file.
 
-2. Lines 298-302 in the code are for switching to a new City-State for the model to run.
+Code Files
 
-3. Please only use the 3 City-State combinations available (Doral, FL; Kendall, FL; Miami, FL) as we unsubscribed from the API after finishing our 
-analysis to not incur more costs. The models will still run from these saved CSV outputs from the earlier API pulls.
+We provide four Python scripts implementing the following predictive models:
+	•	MLR New.py - Multiple Linear Regression
+	•	Neural Network.py - Multi-layer Perceptron with ReLU activation
+	•	Random Forest New.py - Random Forest Regressor
+	•	Gradient Boosting.py - XGBoost Regressor
 
-4. When the code runs, a new csv file should be created (City_State_ranked). This file is sorted by most undervalued to least homes that are for sale.
+Each file is self-contained and will output predictions for a given city-state combination.
 
+Output
+
+The main output for each run is a ranked CSV file named:
+
+City_State_ranked.csv
+
+This file contains homes ranked by their “Undervalued Score” — the difference between the model’s predicted price and the listed price.
+
+Each time a new model is run on the same city-state, the file is updated accordingly.
 
