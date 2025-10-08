@@ -1,0 +1,582 @@
+import requests
+import json
+import pandas as pd
+import os
+import time
+from typing import Dict, Any
+from sklearn.preprocessing import StandardScaler, OneHotEncoder
+from sklearn.compose import ColumnTransformer
+from sklearn.pipeline import make_pipeline
+from sklearn.impute import SimpleImputer
+from sklearn.metrics import r2_score, mean_absolute_error
+import numpy as np
+from datetime import datetime
+import statsmodels.api as sm
+from statsmodels.stats.outliers_influence import variance_inflation_factor
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.model_selection import KFold
+import matplotlib.pyplot as plt
+import seaborn as sns
+from tqdm import tqdm
+
+
+TRAINING_COLUMNS = []
+
+
+# Sends request to Zillow API 
+def make_zillow_request(url, headers, params, retries=5, backoff=1.0):
+    for attempt in range(retries):
+        response = requests.get(url, headers=headers, params=params)
+        if response.status_code == 200:
+            return response
+        elif response.status_code == 429:
+            print(f"Rate limit hit. Retrying in {backoff} seconds...")
+            time.sleep(backoff)
+            backoff *= 2  # Exponential backoff
+        else:
+            print(f"Error {response.status_code}: {response.text}")
+            return None
+    print("Max retries reached.")
+    return None
+
+#It wraps the Zillow API request for a single property and returns the property data as a dictionary, with error handling built in.
+def fetch_property_details(zpid: str, api_key: str) -> Dict[str, Any]:
+    url = "https://zillow-com1.p.rapidapi.com/property"
+    headers = {
+        "x-rapidapi-key": api_key,
+        "x-rapidapi-host": "zillow-com1.p.rapidapi.com"
+    }
+    querystring = {"zpid": zpid}
+
+    response = make_zillow_request(url, headers=headers, params=querystring)
+    if response is None:
+        return None
+
+    try:
+        data = response.json()
+        if isinstance(data, list):
+            data = data[0]
+        return data
+    except json.JSONDecodeError:
+        print(f"Failed to parse JSON for ZPID {zpid}")
+        return None
+
+
+#
+def extract_property_info(property_info: Dict[str, Any], sold_weight: float = 1.0, forsale_weight: float = 0.5) -> Dict[str, Any]:
+    if not isinstance(property_info, dict):
+        print(f"Unexpected data format: {type(property_info)}")
+        return {}
+    
+    # Filter out excluded home types early
+    excluded_home_types = {'MANUFACTURED', 'LOT','HOME_TYPE_UNKNOWN'}
+    home_type = str(property_info.get("homeType", "N/A")).strip().upper()
+    if home_type in excluded_home_types:
+        return {}
+    
+    schools = property_info.get("schools", None)
+
+    # Ensure schools is a list before proceeding
+    if isinstance(schools, list):
+        school_count = len(schools)
+        school_max_rating = max([school.get("rating", 0) if school.get("rating") is not None else 0 for school in schools], default=0)
+    else:
+        school_count = 0
+        school_max_rating = 0  # Or None if you prefer
+    
+    price_history = property_info.get("priceHistory", [])
+    if isinstance(price_history, list):
+        last_sold_price = next((event.get("price") for event in price_history if event.get("event") == "Sold"), None)
+    else:
+        last_sold_price = None
+
+    resoFacts = property_info.get("resoFacts", {})
+    nearbyHomes = property_info.get("nearbyHomes", [])
+    current_home_type = property_info.get("homeType", "N/A")
+    current_living_area = property_info.get("livingArea", "N/A")
+
+    # Calculate houseAge based on the current year and yearBuilt
+    current_year = datetime.now().year
+    year_built = property_info.get("yearBuilt", "N/A")
+    try:
+        house_age = current_year - int(year_built) if year_built != "N/A" and isinstance(year_built, int) else "N/A"
+    except ValueError:
+        house_age = "N/A"
+
+    # Calculate Nearby Home Metrics with Weighted Approach
+    nearby_prices_sold = []
+    nearby_prices_forsale = []
+    nearby_sqft_prices_sold = []
+    nearby_sqft_prices_forsale = []
+
+    for home in nearbyHomes:
+        home_type = home.get("homeType", None)
+        status = home.get("status_type", "ForSale")  # Assuming status_type indicates if it's RecentlySold or ForSale
+
+        if home_type == current_home_type:  # Only consider homes with the same type
+            price = home.get("price")
+            living_area = home.get("livingArea")
+            
+            if price and living_area:
+                price_per_sqft = price / living_area
+                
+                if status == "RecentlySold":
+                    nearby_prices_sold.append(price)
+                    nearby_sqft_prices_sold.append(price_per_sqft)
+                else:
+                    nearby_prices_forsale.append(price)
+                    nearby_sqft_prices_forsale.append(price_per_sqft)
+
+    # Handle different cases for available data
+    if nearby_prices_sold and nearby_prices_forsale:
+        # Both datasets are available, apply weighted average
+        all_prices = nearby_prices_sold + nearby_prices_forsale
+        all_sqft_prices = nearby_sqft_prices_sold + nearby_sqft_prices_forsale
+        weights = [sold_weight] * len(nearby_prices_sold) + [forsale_weight] * len(nearby_prices_forsale)
+
+        weighted_avg_price = np.average(all_prices, weights=weights)
+        weighted_avg_price_per_sqft = np.average(all_sqft_prices, weights=weights)
+        
+    elif nearby_prices_sold:
+        # Only RecentlySold data is available
+        weighted_avg_price = np.mean(nearby_prices_sold)
+        weighted_avg_price_per_sqft = np.mean(nearby_sqft_prices_sold)
+        
+    elif nearby_prices_forsale:
+        # Only ForSale data is available
+        weighted_avg_price = np.mean(nearby_prices_forsale)
+        weighted_avg_price_per_sqft = np.mean(nearby_sqft_prices_forsale)
+        
+    else:
+        # No data available
+        weighted_avg_price = None
+        weighted_avg_price_per_sqft = None
+
+    num_similar_homes = len(nearby_prices_sold) + len(nearby_prices_forsale)
+    
+    return {
+        "zpid": property_info.get("zpid", "N/A"),
+        "address": property_info.get("address", {}).get("streetAddress", "N/A") if isinstance(property_info.get("address"), dict) else "N/A",
+        "city": property_info.get("address", {}).get("city", "N/A") if isinstance(property_info.get("address"), dict) else "N/A",
+        "state": property_info.get("address", {}).get("state", "N/A") if isinstance(property_info.get("address"), dict) else "N/A",
+        "zipcode": property_info.get("address", {}).get("zipcode", "N/A") if isinstance(property_info.get("address"), dict) else "N/A",
+        "price": property_info.get("price", "N/A"),
+        "homeType": property_info.get("homeType", "N/A"),
+        "livingArea": property_info.get("livingArea", "N/A"),
+        "lotAreaValue": property_info.get("lotAreaValue", "N/A"),
+        "bedrooms": property_info.get("bedrooms", "N/A"),
+        "bathrooms": property_info.get("bathrooms", "N/A"),
+        "yearBuilt": property_info.get("yearBuilt", "N/A"),
+        "houseAge": house_age,
+        "monthlyHoaFee": property_info.get("monthlyHoaFee", "N/A"),
+        "propertyCondition": resoFacts.get("propertyCondition", "N/A"),
+        "architecturalStyle": resoFacts.get("architecturalStyle", "N/A"),
+        "garageSpaces": resoFacts.get("garageParkingCapacity", "N/A"),
+        "hasGarage": resoFacts.get("hasGarage", "N/A"),
+        "hasPrivatePool": resoFacts.get("hasPrivatePool", "N/A"),
+        "basementYN": resoFacts.get("basementYN", "N/A"),
+        "parking": property_info.get("parking", "N/A"),
+        "lastSoldPrice": last_sold_price,
+        "schools_count": school_count,
+        "schools_max_rating": school_max_rating,
+        "daysOnZillow": resoFacts.get("daysOnZillow", "N/A"),
+        "latitude": property_info.get("latitude", "N/A"),
+        "longitude": property_info.get("longitude", "N/A"),
+        "furnished": resoFacts.get("furnished", "N/A"),
+        "storiesTotal": resoFacts.get("storiesTotal", "N/A"),
+        "NearbyAvgPrice": weighted_avg_price,
+        "NumSimilarHomesSold": num_similar_homes,
+        "NearbyPricePerSqFt": weighted_avg_price_per_sqft
+    }
+
+
+# This code fetches properties for a city by status type
+def fetch_properties_by_city(city: str, state: str, api_key: str, status_type: str, max_results: int = 2000, max_pages: int = 40) -> pd.DataFrame:
+    file_name = f"{city}_{state}_{status_type}.csv"
+    if os.path.exists(file_name):
+        print(f"Data for {city}, {state} ({status_type}) already exists. Loading from file.")
+        return pd.read_csv(file_name)
+
+    url = "https://zillow-com1.p.rapidapi.com/propertyExtendedSearch"
+    
+    headers = {
+        "x-rapidapi-key": api_key,
+        "x-rapidapi-host": "zillow-com1.p.rapidapi.com"
+    }
+
+    data_list = []
+    seen_zpids = set()
+    total_results = 0
+    excluded_home_types = {'MANUFACTURED', 'LOT','HOME_TYPE_UNKNOWN'}
+
+    for page in tqdm(range(1, max_pages + 1), desc=f"Fetching {status_type} data for {city}, {state}"):
+        querystring = {
+            "location": f"{city}, {state}",
+            "status_type": status_type,
+            "page": str(page)
+        }
+
+        response = make_zillow_request(url, headers=headers, params=querystring)
+        if response.status_code != 200:
+            print(f"Error {response.status_code}: {response.text}")
+            break
+
+        properties = response.json().get('props', [])
+        if not properties:
+            break
+
+        for prop in properties:
+            if total_results >= max_results:
+                break
+
+            zpid = prop.get("zpid")
+            if not zpid or zpid in seen_zpids:
+                continue
+            seen_zpids.add(zpid)
+
+            home_type = str(prop.get("homeType", "N/A")).strip().upper()
+            if home_type in excluded_home_types:
+                continue
+
+            extracted_info = extract_property_info(prop)
+            if not extracted_info:
+                continue
+
+            property_info = fetch_property_details(zpid, api_key)
+            if property_info and isinstance(property_info, dict):
+                detailed_home_type = str(property_info.get("homeType", "N/A")).strip().upper()
+                if detailed_home_type in excluded_home_types:
+                    continue
+
+                additional_info = extract_property_info(property_info)
+                if not additional_info:
+                    continue
+                extracted_info.update({k: v for k, v in additional_info.items() if v != "N/A"})
+
+            data_list.append(extracted_info)
+            total_results += 1
+
+            time.sleep(0.2)
+
+    df = pd.DataFrame(data_list)
+    if not df.empty:
+        df.to_csv(file_name, index=False)
+        print(f"Data for {city}, {state} ({status_type}) saved to {file_name}")
+    
+    return df
+
+
+
+def calculate_scaled_price(row):
+    try:
+        price_per_sqft = row.get('NearbyPricePerSqFt', None)
+        living_area = row.get('livingArea', None)
+        nearby_avg_price = row.get('NearbyAvgPrice', None)
+        
+        # Check if both price_per_sqft and living_area are valid numbers
+        if isinstance(price_per_sqft, (int, float)) and isinstance(living_area, (int, float)):
+            if price_per_sqft > 10000:  # Check if the price per sqft is above the threshold
+                if isinstance(nearby_avg_price, (int, float)):  # Use NearbyAvgPrice if it exists
+                    return nearby_avg_price
+                else:
+                    return None  # Return None if NearbyAvgPrice is not a valid number
+            else:
+                return price_per_sqft * living_area  # Calculate the scaled price normally
+        
+        return None  # Return None if inputs are invalid or missing
+    except KeyError:
+        return None  # Return None if keys are missing
+
+
+def add_scaled_price_feature(property_df: pd.DataFrame):
+    # Create the new column 'NearbyScaledPrices'
+    property_df['NearbyScaledPrices'] = property_df.apply(calculate_scaled_price, axis=1)
+    
+    return property_df
+
+
+
+# Key and City
+api_key = "ef1968a55fmshcaf81f5db26a7bcp1a0ea6jsn3691041cb84a"
+city = "Kendall"
+state = "FL"
+
+# Fetch training data (Recently Sold Homes)
+recently_sold_df = fetch_properties_by_city(city, state, api_key, status_type="RecentlySold")
+
+# Filter out properties priced less than $30,000
+recently_sold_df = recently_sold_df[pd.to_numeric(recently_sold_df['price'], errors='coerce') > 30000]
+
+recently_sold_df = add_scaled_price_feature(recently_sold_df)
+
+# Fetch test data (For Sale Homes)
+forsale_df = fetch_properties_by_city(city, state, api_key, status_type="ForSale")
+
+# Filter out properties priced less than $30,000
+forsale_df = forsale_df[pd.to_numeric(forsale_df['price'], errors='coerce') > 30000]
+
+forsale_df = add_scaled_price_feature(forsale_df)
+
+
+def preprocess_training_data(recently_sold_df: pd.DataFrame):
+    global TRAINING_COLUMNS
+
+    # Define columns to drop
+    drop_columns = [
+        'zpid', 'address', 'city', 'state', 'yearBuilt', 'architecturalStyle', 
+        'basementYN', 'longitude', 'latitude', 'furnished', 
+        'storiesTotal', 'NumSimilarHomesSold', 'parking','lastSoldPrice','NearbyAvgPrice','NearbyPricePerSqFt','propertyCondition'
+    ]
+
+    # Drop specified columns if they exist in the DataFrame
+    recently_sold_df = recently_sold_df.drop(columns=[col for col in drop_columns if col in recently_sold_df.columns], errors='ignore')
+
+    # Replace missing values in `lotAreaValue` using `livingArea`
+    recently_sold_df.loc[recently_sold_df['lotAreaValue'].isna(), 'lotAreaValue'] = recently_sold_df['livingArea']
+
+    # Drop columns that are 100% missing
+    recently_sold_df = recently_sold_df.dropna(axis=1, how='all')
+
+    # Separate features and target
+    X = recently_sold_df.drop(columns=['price'], errors='ignore')
+    y = recently_sold_df['price']
+
+    # Identify categorical and numerical columns
+    categorical_cols = X.select_dtypes(include=['object', 'category']).columns.tolist()
+    numerical_cols = X.select_dtypes(include=[np.number]).columns.tolist()
+
+    # Convert all categorical columns to strings to avoid mixed types
+    for col in categorical_cols:
+        X[col] = X[col].astype(str)  # Ensure all categorical columns are strings
+
+    # Preprocessing pipeline for numeric and categorical data
+    numeric_transformer = make_pipeline(SimpleImputer(strategy='mean'), StandardScaler())
+    categorical_transformer = make_pipeline(SimpleImputer(strategy='most_frequent'), OneHotEncoder(handle_unknown='ignore', sparse_output=False))
+
+    preprocessor = ColumnTransformer(
+        transformers=[
+            ('num', numeric_transformer, numerical_cols),
+            ('cat', categorical_transformer, categorical_cols)
+        ]
+    )
+    
+    # Fit the preprocessor on the training data only and transform it
+    X_transformed = preprocessor.fit_transform(X)
+
+    # Convert transformed data to a numpy array of type float64
+    X_transformed = np.asarray(X_transformed, dtype=np.float64)
+
+    # Save column names for later use
+    categorical_features = preprocessor.transformers_[1][1].named_steps['onehotencoder'].get_feature_names_out(categorical_cols).tolist()
+    TRAINING_COLUMNS = numerical_cols + categorical_features
+
+    print("Training Columns Used:", TRAINING_COLUMNS)
+
+    return X_transformed, y, preprocessor
+
+
+
+
+
+def preprocess_test_data(forsale_df: pd.DataFrame, preprocessor):
+    drop_columns = [
+        'zpid', 'address', 'city', 'state', 'yearBuilt', 'architecturalStyle', 
+        'basementYN', 'longitude', 'latitude', 'furnished', 
+        'storiesTotal', 'NumSimilarHomesSold', 'parking','lastSoldPrice','NearbyAvgPrice','NearbyPricePerSqFt','propertyCondition'
+    ]
+
+    forsale_df.loc[forsale_df['lotAreaValue'].isna(), 'lotAreaValue'] = forsale_df['livingArea']
+    
+    # Drop specified columns
+    forsale_df = forsale_df.drop(columns=[col for col in drop_columns if col in forsale_df.columns], errors='ignore')
+
+
+    # Preprocess test data using the fitted preprocessor
+    X_test = preprocessor.transform(forsale_df)
+
+    # Ensure the output is a numpy array
+    if hasattr(X_test, "toarray"):
+        X_test = X_test.toarray()
+    
+    X_test = np.asarray(X_test, dtype=np.float64)
+    
+    return X_test
+
+
+
+
+def detect_outliers(X, y, threshold=2.5):
+    # Train a basic model to detect outliers
+    model = RandomForestRegressor(n_estimators=100, max_depth=10, min_samples_leaf=5, random_state=42)
+    model.fit(X, y)
+    
+    # Predict prices
+    y_pred = model.predict(X)
+    
+    # Calculate residuals
+    residuals = y - y_pred
+    
+    # Calculate standard deviation of residuals
+    residual_std = np.std(residuals)
+    
+    # Define upper and lower limits for outlier detection
+    lower_limit = -threshold * residual_std
+    upper_limit = threshold * residual_std
+    
+    # Identify outliers
+    outliers = (residuals < lower_limit) | (residuals > upper_limit)
+    
+    # Remove outliers
+    X_cleaned = X[~outliers]
+    y_cleaned = y[~outliers]
+
+    return X_cleaned, y_cleaned
+
+
+def train_and_predict(recently_sold_df: pd.DataFrame, forsale_df: pd.DataFrame, n_splits: int = 5, forsale_weight: float = 0.5) -> pd.DataFrame:
+    global TRAINING_COLUMNS
+
+    recently_sold_df = add_scaled_price_feature(recently_sold_df)
+    forsale_df = add_scaled_price_feature(forsale_df)
+
+    # Preprocess the training data (RecentlySold)
+    X_train_recently_sold, y_train_recently_sold, preprocessor = preprocess_training_data(recently_sold_df)
+    
+    # Remove outliers from training data
+    X_train_recently_sold, y_train_recently_sold = detect_outliers(X_train_recently_sold, y_train_recently_sold)
+
+    # Preprocess the ForSale data using the same preprocessor
+    X_train_forsale, y_train_forsale = preprocess_test_data(forsale_df, preprocessor), forsale_df['price']
+    
+    # Remove NaN prices from ForSale dataset
+    valid_indices = ~y_train_forsale.isna()
+    X_train_forsale = X_train_forsale[valid_indices]
+    y_train_forsale = y_train_forsale[valid_indices]
+
+    # Combine RecentlySold and ForSale data
+    X_combined = np.concatenate([X_train_recently_sold, X_train_forsale])
+    y_combined = np.concatenate([y_train_recently_sold, y_train_forsale])
+
+    # Assign weights: Full weight (1.0) for RecentlySold, Reduced weight for ForSale
+    recently_sold_weights = np.ones(len(y_train_recently_sold))
+    forsale_weights = np.full(len(y_train_forsale), forsale_weight)
+    weights_combined = np.concatenate([recently_sold_weights, forsale_weights])
+
+    # Add constant for intercept
+    X_combined = sm.add_constant(X_combined)
+
+    # Train the model with cross-validation
+    kf = KFold(n_splits=n_splits, shuffle=True, random_state=42)
+    r2_scores = []
+    mae_scores = []
+    
+    for train_index, test_index in kf.split(X_combined):
+        X_train_cv, X_test_cv = X_combined[train_index], X_combined[test_index]
+        y_train_cv, y_test_cv = y_combined[train_index], y_combined[test_index]
+        
+        # Train using statsmodels OLS
+        model = sm.WLS(y_train_cv, X_train_cv, weights=weights_combined[train_index]).fit()
+        
+        y_pred_test = model.predict(X_test_cv)
+
+        r2_scores.append(r2_score(y_test_cv, y_pred_test))
+        mae_scores.append(mean_absolute_error(y_test_cv, y_pred_test))
+        
+    print(f"\nCross-Validation R² Scores: {r2_scores}")
+    print(f"Average R² Score: {np.mean(r2_scores):.4f}")
+    print(f"\nCross-Validation MAE Scores: {mae_scores}")
+    print(f"Average MAE Score: {np.mean(mae_scores):.2f}")
+    
+
+    # Convert X_combined to DataFrame with proper column names
+    X_combined_df = pd.DataFrame(X_combined, columns=["const"] + TRAINING_COLUMNS)
+
+    # Fit the model using statsmodels
+    final_model = sm.WLS(y_combined, X_combined_df, weights=weights_combined).fit()
+    print("\nModel Summary:")
+    print(final_model.summary())
+    
+    # Now preprocess the ForSale dataset using the same preprocessor
+    X_test = preprocess_test_data(forsale_df, preprocessor)
+    X_test = np.asarray(X_test, dtype=np.float64)
+    X_test = sm.add_constant(X_test)
+
+    # Predict prices for ForSale dataset
+    y_pred_test = final_model.predict(X_test)
+    
+    # Add predictions and undervalued score to the original ForSale dataframe
+    forsale_df['PredictedPrice'] = y_pred_test
+    forsale_df['UndervaluedScore'] = forsale_df['PredictedPrice'] - forsale_df['price']
+
+    print("Calculating Variance Inflation Factor (VIF)...")
+    vif_df = calculate_vif(X_combined_df)
+    print(vif_df)
+
+    # Plot Residuals vs. Predicted Values
+    residuals = y_combined - final_model.predict(X_combined)
+    plt.figure(figsize=(10, 6))
+    plt.scatter(final_model.predict(X_combined), residuals, alpha=0.6)
+    plt.axhline(0, color='red', lw=2)
+    plt.title('Residuals vs. Predicted Values')
+    plt.xlabel('Predicted Values')
+    plt.ylabel('Residuals')
+    plt.show()
+
+    # Plot Predicted vs. Actual Values
+    plt.figure(figsize=(10, 6))
+    plt.scatter(y_combined, final_model.predict(X_combined), alpha=0.6)
+    plt.plot([min(y_combined), max(y_combined)], [min(y_combined), max(y_combined)], color='red', lw=2)
+    plt.title('Predicted vs. Actual Prices')
+    plt.xlabel('Actual Prices')
+    plt.ylabel('Predicted Prices')
+    plt.show()
+
+    # Distribution of Residuals
+    plt.figure(figsize=(10, 6))
+    sns.histplot(residuals, kde=True)
+    plt.title("Distribution of Residuals")
+    plt.xlabel("Residuals")
+    plt.show()
+
+    # Plot VIF values
+    plt.figure(figsize=(12, 9))
+    plt.bar(vif_df['Feature'], vif_df['VIF'])
+    plt.title('Variance Inflation Factor (VIF) for Features')
+    plt.xlabel('Features')
+    plt.ylabel('VIF Value')
+    plt.xticks(rotation=90, fontsize=8)
+    plt.subplots_adjust(bottom=0.5)
+    plt.show()
+
+
+    
+    return forsale_df
+
+
+def calculate_vif(X: pd.DataFrame) -> pd.DataFrame:
+    """Calculate Variance Inflation Factor (VIF) for each feature in the dataset."""
+    vif_data = pd.DataFrame()
+    vif_data["Feature"] = X.columns
+    vif_data["VIF"] = [variance_inflation_factor(X.values, i) for i in range(X.shape[1])]
+    return vif_data
+
+
+
+def rank_properties(property_df: pd.DataFrame) -> pd.DataFrame:
+    # Sort by Undervalued Score from most undervalued to least
+    sorted_df = property_df.sort_values(by='UndervaluedScore', ascending=False)
+    return sorted_df
+
+# Train the model and predict prices for homes currently for sale
+forsale_df_with_predictions = train_and_predict(recently_sold_df, forsale_df)
+
+# Rank the properties based on undervalued score
+ranked_df = rank_properties(forsale_df_with_predictions)
+
+# Save the ranked dataframe to CSV
+ranked_df.to_csv(f"{city}_{state}_ranked.csv", index=False)
+print(f"Ranked properties saved to {city}_{state}_ranked.csv")
+
+
+
+
