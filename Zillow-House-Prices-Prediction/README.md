@@ -1,33 +1,56 @@
-Zillow House Price Prediction
+# Zillow House Price Prediction – South Florida
 
-Notes on Running the Code
-	1.	Please ensure the attached CSV files (*_ForSale.csv and *_RecentlySold.csv) are in the same working directory as the .py files. These files are created automatically when the API is first called.
-	2.	To run the models for a new city-state, edit lines 298–302 in the code. These lines allow you to specify the city and state for which you’d like to generate predictions.
-	3.	Only the following city-state combinations can currently be used:
-	•	Doral, FL
-	•	Kendall, FL
-	•	Miami, FL
-Note: We unsubscribed from the API after completing our analysis to avoid additional costs. These models will still run using the saved CSVs from earlier API pulls.
-	4.	Once a model is run, a new CSV file (e.g., Doral_FL_ranked.csv) will be created. This file ranks homes from most undervalued to least.
-	5.	Running a different model on the same city will update the ranking using the new model’s predictions, overwriting the previous ranked file.
+This project analyzes real estate listings in **South Florida** to identify undervalued homes using machine learning models.  
+It pulls listing and sale data using the **Zillow API**, preprocesses and engineers features, and compares performance across:
+- Multiple Linear Regression (MLR)
+- Neural Network
+- Random Forest
+- Gradient Boosting (XGBoost)
 
-Code Files
+Each model outputs a **ranked list of homes** sorted by undervaluation.
 
-We provide four Python scripts implementing the following predictive models:
-	•	MLR New.py - Multiple Linear Regression
-	•	Neural Network.py - Multi-layer Perceptron with ReLU activation
-	•	Random Forest New.py - Random Forest Regressor
-	•	Gradient Boosting.py - XGBoost Regressor
+---
 
-Each file is self-contained and will output predictions for a given city-state combination.
+## How to Run the Code
 
-Output
+1. Ensure the following `.csv` files are in the **same directory** as your `.py` files:
+   - `Doral_FL_ForSale.csv`
+   - `Doral_FL_RecentlySold.csv`
+   - (or corresponding files for Miami or Kendall)
 
-The main output for each run is a ranked CSV file named:
+2. Open one of the following model files:
+   - `MLR.py`
+   - `NeuralNetwork.py`
+   - `RandomForest.py`
+   - `GradientBoosting.py`
 
-City_State_ranked.csv
+3. Update **lines 298–302** to change the `city` and `state` for prediction.
+   - Available options:
+     - `Doral, FL`
+     - `Kendall, FL`
+     - `Miami, FL`
 
-This file contains homes ranked by their “Undervalued Score” — the difference between the model’s predicted price and the listed price.
+4. Run the script. A new file will be created:
+   - `City_State_ranked.csv` → e.g., `Doral_FL_ranked.csv`
+   - Homes are sorted from **most undervalued to least** based on model prediction vs. list price
 
-Each time a new model is run on the same city-state, the file is updated accordingly.
+> ⚠️ API access has been deactivated. The models will use saved CSV files instead of calling Zillow’s API.
 
+---
+
+## Code Files
+
+| Filename              | Description                         |
+|-----------------------|-------------------------------------|
+| `MLR.py`              | Multiple Linear Regression model    |
+| `NeuralNetwork.py`    | Multi-layer Perceptron (Neural Net) |
+| `RandomForest.py`     | Random Forest Regressor             |
+| `GradientBoosting.py` | XGBoost Gradient Boosting model     |
+
+Each file is standalone and trains a model based on city/state input.
+
+---
+
+## Output Format
+
+Each model generates a CSV file named:
