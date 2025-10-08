@@ -19,10 +19,10 @@ Each model outputs a **ranked list of homes** sorted by undervaluation.
    - (or corresponding files for Miami or Kendall)
 
 2. Open one of the following model files:
-   - `MLR.py`
-   - `NeuralNetwork.py`
-   - `RandomForest.py`
-   - `GradientBoosting.py`
+   - `MLR New.py`
+   - `Neural Network.py`
+   - `Random Forest New.py`
+   - `Gradient Boosting.py`
 
 3. Update **lines 298–302** to change the `city` and `state` for prediction.
    - Available options:
@@ -53,4 +53,4 @@ Each file is standalone and trains a model based on city/state input.
 
 ## Output Format
 
-Each model generates a CSV file named:
+When the code runs, a new csv file should be created (City_State_ranked). This file is sorted by most undervalued to least homes that are for sale.
