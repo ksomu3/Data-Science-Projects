@@ -20,8 +20,8 @@ This repository showcases a collection of my **data science and analytics projec
 
 ## Tech Stack
 
-**Languages & Tools:** Python, R, SQL, scikit-learn, XGBoost, pandas, NumPy, ggplot2, Tableau, Power BI, Git, Jupyter  
-**Core Skills:** Predictive Modeling, Machine Learning, NLP, Regression Analysis, Simulation, Feature Engineering, Data Visualization  
+**Languages & Tools:** Python, R, SQL, scikit-learn, XGBoost, pandas, NumPy, ggplot2, Jupyter  
+**Core Skills:** Predictive Modeling, Machine Learning, NLP, Regression Analysis, Simulation, Feature Engineering 
 
 ---
 
