@@ -18,14 +18,6 @@ This repository showcases a collection of my **data science and analytics projec
 
 ---
 
-## 💡 About This Repository
-
-Each project includes:
-- A clear problem statement  
-- Exploratory data analysis (EDA)  
-- Model development and evaluation  
-- Visualizations and key insights  
-
 Feel free to explore the projects and reach out if you’d like to discuss analytics, data science, or collaboration opportunities!
 
 📫 **Contact:** [LinkedIn](https://www.linkedin.com/in/kavin-somu) 
